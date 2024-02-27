@@ -1,0 +1,107 @@
+import numpy as np
+import pandas as pd
+
+#Step1 : Input
+노드개수=11
+기초자산=100000
+최초행사가=100000
+IRR=0.05
+rf=0.015
+kd=0.05
+vol=0.255
+delta_t=1
+u=np.exp(vol*np.sqrt(delta_t))
+d=1/u
+p=(1+rf-d)/(u-d) #1+rf로 해야 동적헷지가 유지됨. rf 고정이므로 p 고정
+
+#Step2 : Boot >> 본 예시는 편의 상 rf의 fwd 유지, kd의 fwd는 0.01% 증가 가정
+#향후에 가정 수정하기
+
+node_array=np.arange(0,노드개수)
+
+kd_forward_array=kd+0.0001*node_array
+
+#Step3 : 전환상환우선주 상환금액 배열 및 사채가치 배열 생성 
+시점별행사가=최초행사가*np.power((1+IRR),node_array)
+
+#시점별행사가와 동일한 넓이의 주계약 array를 만든다
+
+주계약=np.zeros_like(시점별행사가) 
+#zeros_like은 () 안 array와 동일한 shape로 0을 채워넣는다
+
+주계약[-1]=시점별행사가[-1]
+
+for i in reversed(range(노드개수-1)):
+    주계약[i]=주계약[i+1]/(1+kd_forward_array[i+1])
+
+#Step4 : 주가이항트리 생성
+
+주가트리=np.zeros((노드개수,노드개수))
+주가트리[0,0]=기초자산
+
+for i in range(1,노드개수):
+    # 상승노드의 경우, 상승계수만 반영
+    주가트리[0,i]=주가트리[0,i-1]*u
+    # 하락노드
+    주가트리[1:i+1,i]=주가트리[:i,i-1]*d
+
+#Step5 GS Valuation
+
+#필요한 주요 트리 : 의사결정트리, GS트리, 할인율 트리, 보유트리
+
+#일단 array를 만들어주어야 함. 마치 빈 tree를 먼저 똑같이 여러 개 그리듯이
+GS트리=np.zeros_like(주가트리)
+할인율=np.zeros_like(주가트리)
+의사결정트리=np.zeros_like(주가트리)
+보유트리=np.zeros_like(주가트리)
+
+#가장 마지막 값
+GS트리[:,-1]=np.maximum(주가트리[:,-1],시점별행사가[-1]) 
+
+#만약 강제전환이면 주가트리와 GS트리 동일할 것
+
+의사결정트리[:,-1]=np.where(GS트리[:,-1]==주가트리[:,-1],1,0)
+#마지막 트리에서 전환 시 의사결정트리1, 상환 시 0
+#이는 전환확률 상 전환 시 1, 상환 시 0으로 처리하기 때문
+
+할인율[:,-1]=np.where(의사결정트리[:,-1]==1,rf,kd_forward_array[-1])
+
+#백워데이션
+
+# 만기 시점의 보유가치 0으로 업데이트
+보유트리[:,-1]=0
+
+# 백워데이션 순서 : 보유트리 > GS트리 > 의사결정트리 > 할인율
+for i in reversed(range(노드개수)):
+    
+    # 만기 -1 시점의 보유가치 업데이트
+    보유트리[:i,i-1]=GS트리[:i,i]*p/(1+할인율[:i,i])+GS트리[1:i+1,i]*(1-p)/(1+할인율[1:i+1,i])
+        
+    #GS트리 / np.maximum은 두 배열을 비교. 동시 3개 비교 안됨 
+    GS트리[:i,i-1]=np.maximum(np.maximum(보유트리[:i,i-1],시점별행사가[i-1]),주가트리[:i,i-1])
+        
+    #의사결정트리
+    의사결정트리[:i,i-1]=np.where(GS트리[:i,i-1]==주가트리[:i,i-1],1,np.where(GS트리[:i,i-1]==시점별행사가[i-1],0,의사결정트리[:i,i]*p+의사결정트리[1:i+1,i]*(1-p)))
+    
+    #할인율
+    할인율[:i,i-1]=rf*의사결정트리[:i,i-1]+kd_forward_array[i-1]*(1-의사결정트리[:i,i-1])
+
+print()    
+print(GS트리[0,0])
+
+# 액셀로 추출
+
+excel_data={
+    '주가트리':주가트리, 
+    '시점별행사가':시점별행사가, 
+    '주계약':주계약, 
+    '의사결정트리':의사결정트리, 
+    '할인율':할인율, 
+    '보유트리':보유트리, 
+    'GS트리':GS트리
+}
+
+with pd.ExcelWriter('GS모형.xlsx',engine='xlsxwriter') as writer:
+    for key in excel_data.keys():
+        result_df=pd.DataFrame(excel_data[key])
+        result_df.to_excel(writer, sheet_name=key, index=True)
