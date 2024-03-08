@@ -5,6 +5,7 @@
 import requests
 from io import BytesIO
 import pandas as pd
+import re
 
 # Final - User_Agent 및 함수정의 
 
