@@ -1,0 +1,50 @@
+# <Final> 
+
+# Final - 필요 모듈 임포트
+
+import requests
+from io import BytesIO
+import pandas as pd
+
+# Final - User_Agent 및 함수정의 
+
+user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0'
+#https://www.whatismybrowser.com/detect/what-is-my-user-agent/ 에서 자기 user-agent 확인 가능
+
+def download_excel(a,b,c):
+    url='https://dart.fss.or.kr/pdf/download/excel.do?rcp_no={}&dcm_no={}&lang=ko'.format(b,c)
+    resp=requests.get(url, headers={'user-agent':user_agent})
+    table=BytesIO(resp.content)
+    for i in ['연결 재무상태표','연결 포괄손익계산서','연결 자본변동표','연결 현금흐름표']:
+        data=pd.read_excel(table, sheet_name=i, skiprows=5)
+        data.to_csv(r'C:\Users\user\practice\{}_{}.csv'.format(i,str(a)), encoding='utf-8-sig')
+
+# Final - Input 
+crtfc_key='0a1caabde0f404410d69c99834f29a6921407140'
+corp_code='00126380'
+bgn_de='20210101'
+end_de='20230331'  #YYYYMMDD 형식으로 입력하기
+
+# Final - 연산
+
+요청URL=f'https://opendart.fss.or.kr/api/list.xml?crtfc_key={crtfc_key}&corp_code={corp_code}&bgn_de={bgn_de}&end_de={end_de}&pblntf_detail_ty=A001&pblntf_detail_ty=A002&pblntf_detail_ty=A003&page_count=100'
+
+resp=requests.get(요청URL)
+webpage=resp.content.decode('UTF-8')
+
+rcp_no_list=re.findall(r'<rcept_no>(.*?)</rcept_no>',webpage)
+period_list=re.findall(r'<report_nm>(.*?)</report_nm>',webpage) 
+
+dcm_no_list=[]
+
+for i in rcp_no_list:
+    resp1=requests.get(f'https://dart.fss.or.kr/dsaf001/main.do?rcpNo={i}')
+    webpage1=resp1.content.decode('UTF-8')
+    dcm_no_list.append(re.findall(fr"{i}', '(.*?)',", webpage1)[1])
+
+print(dcm_no_list)
+
+for a,b,c in zip(period_list, rcp_no_list, dcm_no_list):
+    download_excel(a,b,c)
+
+# 23년 3분기부터는 pdf만 제공해서 오류 발생하므로 end_de 추가!
