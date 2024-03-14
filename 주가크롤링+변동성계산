@@ -1,0 +1,57 @@
+# 필요한 라이브러리 들고 오기
+
+import FinanceDataReader as fdr
+import pandas as pd
+import numpy as np
+import math
+
+# input
+
+평가기준일 ='20231231'
+표본 = 180
+TradingDays= 252
+
+stock_list = {
+    '005930': '삼성전자',
+    '000660': 'SK하이닉스',
+    '005380': '현대자동차'
+}
+
+# 종가(Close) 값만 가져와서 dataframe 생성
+df_list = [fdr.DataReader(code, end=평가기준일)['Close'].iloc[-표본:] for code in stock_list.keys()]
+
+# 컬럼으로 이어붙입니다(concat)
+df_주가 = pd.concat(df_list, axis=1)
+
+# 컬럼명을 지정합니다
+df_주가.columns = stock_list.values()
+
+# 변동성 계산
+종목별_로그수익률=np.log(df_주가 / df_주가.shift(1))
+종목별_일변동성=np.std(종목별_로그수익률, ddof=1) #ddof=1 >> 자유도 1 이므로 표본 표준편차
+종목별_연환산변동성=종목별_일변동성*math.sqrt(TradingDays)
+종목별_연환산변동성
+변동성=np.mean(종목별_연환산변동성)
+
+# 감사인 제공 자료 
+df_변동성=pd.DataFrame(index=['일변동성', 'TradingDays', '연환산변동성', '', '변동성평균'],columns=stock_list.values()) # 새 데이터프레임 생성
+df_변동성.iloc[0,:]=pd.DataFrame(종목별_일변동성).T.iloc[0,:]
+df_변동성.iloc[1,:]=TradingDays
+df_변동성.iloc[2,:]=pd.DataFrame(종목별_연환산변동성).T.iloc[0,:]
+df_변동성.iloc[3,:]=''
+df_변동성.iloc[4,0]=변동성
+df_변동성.iloc[4,1:]=''
+df_변동성
+
+# 액셀 파일 저장 전 인덱스 상 날짜 표기방식 수정
+
+종목별_로그수익률.index=종목별_로그수익률.index.strftime('%Y-%m-%d')
+df_주가.index=df_주가.index.strftime('%Y-%m-%d')
+
+# 액셀 파일로 저장
+
+with pd.ExcelWriter('변동성.xlsx') as writer:
+    df_변동성.to_excel(writer, sheet_name='감사인제공', startrow=2, startcol=1)
+    df_주가.to_excel(writer, index_label='주가', sheet_name='감사인제공', startrow=9, startcol=1)
+    종목별_로그수익률.to_excel(writer, index_label='로그수익률', sheet_name='감사인제공', startrow=(11+표본), startcol=1)
+
